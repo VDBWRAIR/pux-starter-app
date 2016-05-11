@@ -1,27 +1,28 @@
 module App.Seq where
+import Data.Either
+import Test.QuickCheck.Gen as Gen
+import Prelude
+import Data.Generic
+import Data.Maybe
+import Data.Array as A
+import Data.Date as Date
+import Data.Int as Int
 import Data.StrMap as StrMap
+import Data.String as S
+import App.Routes (Route(Home, NotFound))
 import Control.Monad.Eff.Exception.Unsafe (unsafeThrow)
-import Data.Array.Unsafe (last)
 import Data.Array (zip)
+import Data.Array.Unsafe (last)
+import Data.Array.Unsafe (unsafeIndex)
+import Data.Foldable (Foldable, intercalate)
+import Data.Maybe (Maybe, fromMaybe)
 import Data.String (split)
 import Data.Traversable (sequence)
-import Data.Date as Date
-import Data.Either
-import App.Routes (Route(Home, NotFound))
 import Pux.Html (Html, div, p, text, table, tr, td, input)
 import Pux.Html.Attributes (className, checked, value, type_)
-import Prelude --(id, const, ($), show, (<>), (<$>), Eq, (==), (&&), not, (<<<), map, Show)
 import Pux.Html.Events (onClick)
-import Data.Foldable (Foldable, intercalate)
-import Data.Generic
-import Data.Maybe (Maybe, fromMaybe) 
---import Text.Parsing.CSV (defaultParsers, makeParsers)
---import Text.Parsing.Parser (runParser)
-import Data.Array.Unsafe (unsafeIndex)
-import Data.Array as A
-import Data.String as S
-import Data.Maybe
-import Data.Int as Int 
+import Test.QuickCheck.Arbitrary (class Arbitrary)
+import Data.CSVGeneric 
 --import Data.Eulalie.Parser as P
 --import Data.Eulalie.String as S 
 
@@ -56,8 +57,8 @@ instance eqHost :: Eq Host where
 undot :: String -> String    
 undot s = last $ S.split "." s
 
-readSerotype = makeRead serotypes
-serotypes = [DENV1 , DENV2 , DENV3 , DENV4 , HN1 , H1N1 , H5N1 , H3N2 , H7N9]
+readSerotype = makeRead serotypes 
+
 makeRead :: forall a. (Show a) => Array a -> (String -> Maybe a)
 makeRead xs = f 
   where
@@ -66,12 +67,18 @@ makeRead xs = f
         msg = "Could not coerce " <> x <> " to one of " <> (show m)
     m = StrMap.fromFoldable $ zip (map show xs) xs
     
-data Serotype = DENV1 | DENV2 | DENV3 | DENV4 | HN1 | H1N1 | H5N1 | H3N2 | H7N9
 derive instance genericSerotype :: Generic Serotype 
 instance showSerotype :: Show Serotype where
     show = undot <<< gShow 
 instance eqSerotype :: Eq Serotype where
     eq = gEq
+    
+data Serotype = DENV1 | DENV2 | DENV3 | DENV4 | HN1 | H1N1 | H5N1 | H3N2 | H7N9
+serotypes = [DENV1 , DENV2 , DENV3 , DENV4 , HN1 , H1N1 , H5N1 , H3N2 , H7N9]
+
+    
+instance arbitrarySerotype :: Arbitrary Serotype where
+  arbitrary = Gen.elements DENV1 serotypes
     
 segments = [PB1 , PB2 , PA , HA , NP , NA , M1 , NS1]
 readSegment = makeRead [PB1 , PB2 , PA , HA , NP , NA , M1 , NS1]
@@ -80,6 +87,56 @@ derive instance genericSegment :: Generic Segment
 instance showSegment :: Show Segment where
   show = undot <<< gShow
 instance eqSegment :: Eq Segment where
+  eq = gEq
+
+newtype Row = Row {
+                  name :: String
+                , year :: Int
+                , date :: Maybe String
+                , continent :: Maybe String
+                , subtype :: Maybe String
+                , databaseName :: Maybe String 
+                , accHA     :: String
+                , segmentHA     :: String
+                , accMP     :: String
+                , segementMP     :: String
+                , accNA     :: String
+                , segmentNA     :: String
+                , accNP     :: String
+                , segmentNP     :: String
+                , accNS     :: String
+                , segmentNS     :: String
+                , accPA     :: String
+                , segmentPA     :: String
+                , accPB1     :: String
+                , segmentPB1     :: String
+                , accPB2     :: String
+                , segmentPB2     :: String
+                }
+derive instance genericRow :: Generic Row
+instance showRow :: Show Row where
+  show = undot <<< gShow
+instance eqRow :: Eq Row where
+  eq = gEq
+  
+newtype Entry = Entry {
+       name     :: String
+     , acc      :: String
+     , country  :: String 
+     , serotype :: Serotype
+     , segment  :: Maybe Segment
+     , genotype :: Maybe Genotype
+     , sequence :: String
+     , hostString :: String
+     , month :: Maybe Int
+     , year :: Int
+     , day :: Maybe Int
+     --, date     :: Date.Date
+}
+derive instance genericEntry :: Generic Entry
+instance showEntry :: Show Entry where
+  show = undot <<< gShow
+instance eqEntry :: Eq Entry where
   eq = gEq
 
 type Year = Int 
@@ -99,7 +156,7 @@ type State = {
      , year :: Int
      , day :: Maybe Int
      }
-             
+data Separator = Comma | Tab
 --columns = map fst [("name", id') ,  ("acc", id') ,  ("country", id') ,  ("year", Int.fromString) ,  ("host", readHost) ,  ("seortype", readSegment) ,  ("segment", maybe' readSegment) ,  ("genotype", maybe' readGenotype)]
 
 -- TODO: include Dates
@@ -111,14 +168,17 @@ columns = ["name", "acc", "country",  "year", "host", "serotype", "segment", "ge
 --    applyRow row = zipWith ($) funcs row
 --    funcs = map snd $ A.sortBy headerOrder columns
 --readCSV :: String -> String -> Maybe (Array State)
-readCSV :: String -> String -> Either Error (Array State)
+readCSV :: Separator -> String -> Either Error (Array State)
 --readCSV sep s = process <$> (toEither "no head" $ A.head lines') <*> (toEither "no tail" $ A.tail lines')
 readCSV sep s = do
                   head <- (toEither "no head" $ A.head lines')
                   rows <- (toEither "no tail" $ A.tail lines')
                   process head rows
   where
-    lines' = map (S.split sep) $ lines s
+    sep' = case sep of
+      Comma -> ","
+      Tab -> "\t"
+    lines' = map (S.split sep') $ lines s
     lines  = S.split "\n"
     
 type Error = String        
